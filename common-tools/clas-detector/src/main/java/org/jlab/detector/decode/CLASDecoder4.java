@@ -1,5 +1,7 @@
 package org.jlab.detector.decode;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import org.jlab.detector.scalers.DaqScalers;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,7 +28,9 @@ import org.jlab.io.hipo.HipoDataSync;
 
 import org.jlab.jnp.hipo4.data.Bank;
 import org.jlab.jnp.hipo4.data.Event;
+import org.jlab.jnp.hipo4.data.Node;
 import org.jlab.jnp.hipo4.data.SchemaFactory;
+import org.jlab.jnp.hipo4.io.HipoReader;
 import org.jlab.jnp.hipo4.io.HipoWriterSorted;
 
 import org.jlab.utils.benchmark.ProgressPrintout;
@@ -776,8 +780,206 @@ public class CLASDecoder4 {
     }
     
     
+    public static void decode5(String[] args){
+        
+        OptionParser parser = new OptionParser("decoder");
+
+        parser.setDescription("CLAS12 Data Decoder");
+        parser.addOption("-n", "-1", "maximum number of events to process");
+        parser.addOption("-c", "2", "compression type (0-NONE, 1-LZ4 Fast, 2-LZ4 Best, 3-GZIP)");
+        parser.addOption("-d", "0","debug mode, set >0 for more verbose output");
+        parser.addOption("-m", "run","translation tables source (use -m devel for development tables)");
+        parser.addOption("-b", "16","record buffer size in MB");
+        parser.addOption("-evio", "0","flag to write EVIO into the file [1-write evio event]");
+        parser.addRequired("-o","output.hipo");
+
+
+        parser.addOption("-r", "-1","run number in the header bank (-1 means use CODA run)");
+        parser.addOption("-t", "-0.5","torus current in the header bank");
+        parser.addOption("-s", "0.5","solenoid current in the header bank");
+        parser.addOption("-x", null,"CCDB timestamp (MM/DD/YYYY-HH:MM:SS)");
+        parser.addOption("-v","default","CCDB variation");               
+
+        parser.parse(args);
+        
+        List<String> inputList = parser.getInputList();
+
+        if(inputList.isEmpty()==true){
+            parser.printUsage();
+            System.out.println("\n >>>> error : no input file is specified....\n");
+            System.exit(0);
+        }
+
+        String modeDevel = parser.getOption("-m").stringValue();
+        boolean developmentMode = false;
+
+        if(modeDevel.compareTo("run")!=0&&modeDevel.compareTo("devel")!=0){
+            parser.printUsage();
+            System.out.println("\n >>>> error : mode has to be set to \"run\" or \"devel\" ");
+            System.exit(0);
+        }
+
+        if(modeDevel.compareTo("devel")==0){
+            developmentMode = true;
+        }
+
+        String outputFile = parser.getOption("-o").stringValue();
+        int compression = parser.getOption("-c").intValue();
+        int  recordsize = parser.getOption("-b").intValue();
+        int debug = parser.getOption("-d").intValue();
+        int writeEvio = parser.getOption("-evio").intValue();
+
+        CLASDecoder4 decoder = new CLASDecoder4(developmentMode);
+
+        decoder.setDebugMode(debug);
+
+        HipoWriterSorted writer = new HipoWriterSorted();
+        writer.setCompressionType(compression);
+        writer.getSchemaFactory().initFromDirectory(ClasUtilsFile.getResourceDir("CLAS12DIR", "etc/bankdefs/hipo4"));
+
+        Bank  rawScaler   = new Bank(writer.getSchemaFactory().getSchema("RAW::scaler"));
+        Bank  rawRunConf  = new Bank(writer.getSchemaFactory().getSchema("RUN::config"));
+        Bank  helicityAdc = new Bank(writer.getSchemaFactory().getSchema("HEL::adc"));
+        Event scalerEvent = new Event();
+
+        int nrun = parser.getOption("-r").intValue();
+        double torus = parser.getOption("-t").doubleValue();
+        double solenoid = parser.getOption("-s").doubleValue();
+
+        writer.open(outputFile);
+        ProgressPrintout progress = new ProgressPrintout();
+        System.out.println("INPUT LIST SIZE = " + inputList.size());
+        int nevents = parser.getOption("-n").intValue();
+        int counter = 0;
+
+        if(nrun>0){
+            decoder.setRunNumber(nrun,true);
+        }
+
+        if (parser.getOption("-x").getValue() != null)
+            decoder.detectorDecoder.setTimestamp(parser.getOption("-x").stringValue());
+        if (parser.getOption("-v").getValue() != null)
+            decoder.detectorDecoder.setVariation(parser.getOption("-v").stringValue());
+
+        // Store all helicity readings, ordered by timestamp:
+        TreeSet<HelicityState> helicityReadings = new TreeSet<>();
+
+        for(String inputFile : inputList){
+            Event event = new Event();
+            HipoReader reader = new HipoReader();
+            reader.open(inputFile);
+            //EvioSource reader = new EvioSource();
+            //reader.open(inputFile);
+           
+            while(reader.hasNext()==true){
+                
+                reader.nextEvent(event);
+                
+                try {
+                    Node node = event.read(1, 11);
+                    byte[] data = node.getByte();
+                
+                    EvioDataEvent  evioEvent = new EvioDataEvent(data,ByteOrder.LITTLE_ENDIAN);
+                //EvioDataEvent event = (EvioDataEvent) reader.getNextEvent();
+                
+                int position = event.scan(1, 12);
+                int   length = 0;
+                if(position>0)
+                    length = event.scanLengthAt(1, 12, position);
+                //System.out.printf("position = %d, length = %d\n",position,length);
+                
+                Event  decodedEvent = decoder.getDataEvent(evioEvent);
+                
+                Bank   header = decoder.createHeaderBank( nrun, counter, (float) torus, (float) solenoid);
+                if(header!=null) decodedEvent.write(header);
+                Bank   trigger = decoder.createTriggerBank();
+                if(trigger!=null) decodedEvent.write(trigger);
+                Bank onlineHelicity = decoder.createOnlineHelicityBank();
+                if(onlineHelicity!=null) decodedEvent.write(onlineHelicity);
+                Bank decodedHelicity = decoder.createHelicityDecoderBank(evioEvent);
+                if (decodedHelicity!=null) decodedEvent.write(decodedHelicity);
+                
+                Bank epics = decoder.createEpicsBank();
+                
+                decodedEvent.read(rawScaler);
+                decodedEvent.read(rawRunConf);
+                decodedEvent.read(helicityAdc);
+
+                decoder.extractPulses(decodedEvent);
+
+                helicityReadings.add(HelicityState.createFromFadcBank(helicityAdc, rawRunConf,
+                    decoder.detectorDecoder.scalerManager));
+
+                if(rawScaler.getRows()>0 || epics!=null) {
+                    scalerEvent.reset();
+                    
+                    if(rawScaler.getRows()>0) scalerEvent.write(rawScaler);
+                    if(rawRunConf.getRows()>0) scalerEvent.write(rawRunConf);
+
+                    for (Bank b : decoder.createReconScalerBanks(decodedEvent)) {
+                        decodedEvent.write(b);
+                        scalerEvent.write(b);
+                    }
+
+                    if (epics!=null) {
+                        decodedEvent.write(epics);
+                        scalerEvent.write(epics);
+                    }
+
+                    writer.addEvent(scalerEvent, 1);
+                }
+                
+                /*if(writeEvio>0){
+                    int size = event.getEventBuffer().getInt(0);                    
+                    //System.out.printf(" size = %d (%d) \n", size, size*4);
+                    int length = size*4+8;
+                    if(length<100*1024){
+                        //byte[] nodeBytes = new byte[length];
+                        //System.arraycopy(event.getEventBuffer().array(), 0, nodeBytes, 0, length);
+                        Node node = new Node(1,11,DataType.BYTE,length);
+                        for(int i = 0; i < length; i++) node.setByte(i, event.getEventBuffer().array()[i]);
+                        decodedEvent.write(node);
+                    }
+                }*/
+                
+                if(position>0){
+                    int  evtSize = decodedEvent.getEventBufferSize();
+                    
+                    decodedEvent.require(evtSize+length+24,true);
+                    ByteBuffer b = decodedEvent.getEventBuffer();
+                    int        offset = b.getInt(4);
+                    
+                    System.arraycopy(event.getEventBuffer().array(), position, b.array(), evtSize, length+8);
+                    b.putInt(4, evtSize+8+length);
+                }
+                
+                writer.addEvent(decodedEvent,0);
+                
+                counter++;
+                progress.updateStatus();
+                if(counter%25000==0){
+                    System.gc();
+                }
+                if(nevents>0){
+                    if(counter>=nevents) break;
+                }
+            } catch (Exception e) { System.out.println("oooooooops......");}
+            }
+
+        }
+
+        // add the helicity flips into new tag-1 events:
+        HelicitySequence.writeFlips(writer, helicityReadings);
+
+        writer.close();
+    
+    }
+    
     public static void main(String[] args){
 
+        CLASDecoder4.decode5(args);
+        
+        /*
         OptionParser parser = new OptionParser("decoder");
 
         parser.setDescription("CLAS12 Data Decoder");
@@ -912,7 +1114,7 @@ public class CLASDecoder4 {
         // add the helicity flips into new tag-1 events:
         HelicitySequence.writeFlips(writer, helicityReadings);
 
-        writer.close();
+        writer.close();*/
     }
 
 }
