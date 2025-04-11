@@ -1,0 +1,51 @@
+io-services:
+  reader:
+    class: org.jlab.io.clara.HipoToHipoReader
+    name: HipoToHipoReader
+  writer:
+    class: org.jlab.io.clara.HipoToHipoWriter
+    name: HipoToHipoWriter
+services:
+  - class: org.jlab.clas.swimtools.MagFieldsEngine
+    name: MAGFIELDS
+# DC clustering: nominal algoritm, filled the cluster bank for ai and conventional tracking
+  - class: org.jlab.service.dc.DCHBClustering
+    name: DCCR
+# DC using clustering: regular HB tracking
+  - class: org.jlab.service.dc.DCHBPostClusterConv
+    name: DCHB
+  - class: org.jlab.service.ftof.FTOFHBEngine
+    name: FTOFHB
+  - class: org.jlab.service.ec.ECEngine
+    name: EC
+  - class: org.jlab.service.htcc.HTCCReconstructionService
+    name: HTCC
+  - class: org.jlab.service.ltcc.LTCCEngine
+    name: LTCC
+  - class: org.jlab.service.eb.EBHBEngine
+    name: EBHB
+  - class: org.jlab.service.dc.DCTBEngine
+    name: DCTB  
+    name: FTOFTB
+  - class: org.jlab.service.eb.EBTBEngine
+    name: EBTB
+configuration:
+  global:
+    variation: rgb_spring2019
+#    timestamp: 12/31/2020-00:00:00
+#    triggerMask: "0x1"
+## uncomment the following two lines for compatibility with alignments before the DC fixes
+#    dcMinistagger: "NOTONREFWIRE"
+#    dcFeedthroughs: "OFF"
+#  io-services:
+#    writer:
+#      schema_dir: "absolute-path-to-schema-folder"
+#      for example:
+#      schema_dir: "/home/clas12-1/chef/myClara/plugins/clas12/etc/bankdefs/dst"
+  services:
+    MAGFIELDS:
+      magfieldSolenoidMap: Symm_solenoid_r601_phi1_z1201_13June2018.dat
+      magfieldTorusMap: Full_torus_r251_phi181_z251_25Jan2021.dat
+      
+mime-types:
+  - binary/data-hipo

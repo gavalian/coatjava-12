@@ -21,6 +21,7 @@ import org.jlab.utils.options.OptionParser;
  * @author gavalian
  */
 public class EngineStream {
+    
     public static DataFrame createFrames(int count){
         DataFrame<Event>  frame = new DataFrame<>();        
         for(int i = 0; i < count; i++) frame.addEvent(new Event());
@@ -40,16 +41,18 @@ public class EngineStream {
     }
 
     public static void main(String[] args){
+        
         OptionParser parser = new OptionParser("run-stream");
         parser.setDescription("run reconstruction in stream mode");
-        parser.addOption("-n", "-1", "maximum number of events to process");
-        parser.addOption("-t", "4", "number of threads");
-        parser.addOption("-f", "24", "frame size");
+        parser.addOption(  "-n", "-1", "maximum number of events to process");
+        parser.addOption(  "-t", "4", "number of threads");
+        parser.addOption(  "-f", "24", "frame size");
         parser.addRequired("-y","YAML FILE");
         parser.addRequired("-i","input file name");
         parser.addRequired("-o","cooked output file");
         
         parser.parse(args);
+        
         EngineStreamWorker worker = new EngineStreamWorker();
         worker.initYAML(parser.getOption("-y").stringValue());
         
@@ -58,6 +61,7 @@ public class EngineStream {
         
         int nThreads = parser.getOption("-t").intValue();
         int nFrames  = parser.getOption("-f").intValue();
+        
         List<DataActor> actors = EngineStream.createActors(nThreads, nFrames, Arrays.asList(worker));
         
         HipoReader r = new HipoReader(input);
