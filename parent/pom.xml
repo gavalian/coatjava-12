@@ -16,6 +16,12 @@
       <id>jnp-maven</id>
       <url>https://clasweb.jlab.org/jhep/maven</url>
     </repository>
+
+    <repository>
+      <id>github-j4np</id>
+      <url>https://maven.pkg.github.com/gavalian/j4np</url>
+    </repository>
+    
   </repositories>
 
 
